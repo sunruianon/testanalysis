@@ -1,0 +1,510 @@
+vmlinux:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+ffffffff81000000 <_text>:
+	 * Setup stack for verify_cpu(). "-8" because stack_start is defined
+	 * this way, see below. Our best guess is a NULL ptr for stack
+	 * termination heuristics and we don't want to break anything which
+	 * might depend on it (kgdb, ...).
+	 */
+	leaq	(__end_init_task - 8)(%rip), %rsp
+ffffffff81000000:	48 8d 25 f1 3f e0 00 	lea    0xe03ff1(%rip),%rsp        # ffffffff81e03ff8 <__end_rodata_hpage_align+0x3ff8>
+
+	/* Sanitize CPU configuration */
+	call verify_cpu
+ffffffff81000007:	e8 9d 01 00 00       	callq  ffffffff810001a9 <verify_cpu>
+
+	/*
+	 * Compute the delta between the address I am compiled to run at and the
+	 * address I am actually running at.
+	 */
+	leaq	_text(%rip), %rbp
+ffffffff8100000c:	48 8d 2d ed ff ff ff 	lea    -0x13(%rip),%rbp        # ffffffff81000000 <_text>
+	subq	$_text - __START_KERNEL_map, %rbp
+ffffffff81000013:	48 81 ed 00 00 00 01 	sub    $0x1000000,%rbp
+
+	/* Is the address not 2M aligned? */
+	testl	$~PMD_PAGE_MASK, %ebp
+ffffffff8100001a:	f7 c5 ff ff 1f 00    	test   $0x1fffff,%ebp
+	jnz	bad_address
+ffffffff81000020:	0f 85 8f 02 00 00    	jne    ffffffff810002b5 <bad_address>
+
+	/*
+	 * Is the address too large?
+	 */
+	leaq	_text(%rip), %rax
+ffffffff81000026:	48 8d 05 d3 ff ff ff 	lea    -0x2d(%rip),%rax        # ffffffff81000000 <_text>
+	shrq	$MAX_PHYSMEM_BITS, %rax
+ffffffff8100002d:	48 c1 e8 2e          	shr    $0x2e,%rax
+	jnz	bad_address
+ffffffff81000031:	0f 85 7e 02 00 00    	jne    ffffffff810002b5 <bad_address>
+
+	/*
+	 * Fixup the physical addresses in the page table
+	 */
+	addq	%rbp, early_level4_pgt + (L4_START_KERNEL*8)(%rip)
+ffffffff81000037:	48 01 2d ba ef fe 00 	add    %rbp,0xfeefba(%rip)        # ffffffff81feeff8 <early_level4_pgt+0xff8>
+
+	addq	%rbp, level3_kernel_pgt + (510*8)(%rip)
+ffffffff8100003e:	48 01 2d ab 9f e0 00 	add    %rbp,0xe09fab(%rip)        # ffffffff81e09ff0 <level3_kernel_pgt+0xff0>
+	addq	%rbp, level3_kernel_pgt + (511*8)(%rip)
+ffffffff81000045:	48 01 2d ac 9f e0 00 	add    %rbp,0xe09fac(%rip)        # ffffffff81e09ff8 <level3_kernel_pgt+0xff8>
+
+	addq	%rbp, level2_fixmap_pgt + (506*8)(%rip)
+ffffffff8100004c:	48 01 2d 7d bf e0 00 	add    %rbp,0xe0bf7d(%rip)        # ffffffff81e0bfd0 <level2_fixmap_pgt+0xfd0>
+	 * Set up the identity mapping for the switchover.  These
+	 * entries should *NOT* have the global bit set!  This also
+	 * creates a bunch of nonsense entries but that is fine --
+	 * it avoids problems around wraparound.
+	 */
+	leaq	_text(%rip), %rdi
+ffffffff81000053:	48 8d 3d a6 ff ff ff 	lea    -0x5a(%rip),%rdi        # ffffffff81000000 <_text>
+	leaq	early_level4_pgt(%rip), %rbx
+ffffffff8100005a:	48 8d 1d 9f df fe 00 	lea    0xfedf9f(%rip),%rbx        # ffffffff81fee000 <early_level4_pgt>
+
+	movq	%rdi, %rax
+ffffffff81000061:	48 89 f8             	mov    %rdi,%rax
+	shrq	$PGDIR_SHIFT, %rax
+ffffffff81000064:	48 c1 e8 27          	shr    $0x27,%rax
+
+	leaq	(4096 + _KERNPG_TABLE)(%rbx), %rdx
+ffffffff81000068:	48 8d 93 63 10 00 00 	lea    0x1063(%rbx),%rdx
+	movq	%rdx, 0(%rbx,%rax,8)
+ffffffff8100006f:	48 89 14 c3          	mov    %rdx,(%rbx,%rax,8)
+	movq	%rdx, 8(%rbx,%rax,8)
+ffffffff81000073:	48 89 54 c3 08       	mov    %rdx,0x8(%rbx,%rax,8)
+
+	addq	$4096, %rdx
+ffffffff81000078:	48 81 c2 00 10 00 00 	add    $0x1000,%rdx
+	movq	%rdi, %rax
+ffffffff8100007f:	48 89 f8             	mov    %rdi,%rax
+	shrq	$PUD_SHIFT, %rax
+ffffffff81000082:	48 c1 e8 1e          	shr    $0x1e,%rax
+	andl	$(PTRS_PER_PUD-1), %eax
+ffffffff81000086:	25 ff 01 00 00       	and    $0x1ff,%eax
+	movq	%rdx, 4096(%rbx,%rax,8)
+ffffffff8100008b:	48 89 94 c3 00 10 00 	mov    %rdx,0x1000(%rbx,%rax,8)
+ffffffff81000092:	00 
+	incl	%eax
+ffffffff81000093:	ff c0                	inc    %eax
+	andl	$(PTRS_PER_PUD-1), %eax
+ffffffff81000095:	25 ff 01 00 00       	and    $0x1ff,%eax
+	movq	%rdx, 4096(%rbx,%rax,8)
+ffffffff8100009a:	48 89 94 c3 00 10 00 	mov    %rdx,0x1000(%rbx,%rax,8)
+ffffffff810000a1:	00 
+
+	addq	$8192, %rbx
+ffffffff810000a2:	48 81 c3 00 20 00 00 	add    $0x2000,%rbx
+	movq	%rdi, %rax
+ffffffff810000a9:	48 89 f8             	mov    %rdi,%rax
+	shrq	$PMD_SHIFT, %rdi
+ffffffff810000ac:	48 c1 ef 15          	shr    $0x15,%rdi
+	addq	$(__PAGE_KERNEL_LARGE_EXEC & ~_PAGE_GLOBAL), %rax
+ffffffff810000b0:	48 05 e3 00 00 00    	add    $0xe3,%rax
+	leaq	(_end - 1)(%rip), %rcx
+ffffffff810000b6:	48 8d 0d 42 0f 28 01 	lea    0x1280f42(%rip),%rcx        # ffffffff82280fff <.brk.early_pgt_alloc+0xbfff>
+	shrq	$PMD_SHIFT, %rcx
+ffffffff810000bd:	48 c1 e9 15          	shr    $0x15,%rcx
+	subq	%rdi, %rcx
+ffffffff810000c1:	48 29 f9             	sub    %rdi,%rcx
+	incl	%ecx
+ffffffff810000c4:	ff c1                	inc    %ecx
+
+1:
+	andq	$(PTRS_PER_PMD - 1), %rdi
+ffffffff810000c6:	48 81 e7 ff 01 00 00 	and    $0x1ff,%rdi
+	movq	%rax, (%rbx,%rdi,8)
+ffffffff810000cd:	48 89 04 fb          	mov    %rax,(%rbx,%rdi,8)
+	incq	%rdi
+ffffffff810000d1:	48 ff c7             	inc    %rdi
+	addq	$PMD_SIZE, %rax
+ffffffff810000d4:	48 05 00 00 20 00    	add    $0x200000,%rax
+	decl	%ecx
+ffffffff810000da:	ff c9                	dec    %ecx
+	jnz	1b
+ffffffff810000dc:	75 e8                	jne    ffffffff810000c6 <_text+0xc6>
+	 * Fixup the kernel text+data virtual addresses. Note that
+	 * we might write invalid pmds, when the kernel is relocated
+	 * cleanup_highmap() fixes this up along with the mappings
+	 * beyond _end.
+	 */
+	leaq	level2_kernel_pgt(%rip), %rdi
+ffffffff810000de:	48 8d 3d 1b 9f e0 00 	lea    0xe09f1b(%rip),%rdi        # ffffffff81e0a000 <level2_kernel_pgt>
+	leaq	4096(%rdi), %r8
+ffffffff810000e5:	4c 8d 87 00 10 00 00 	lea    0x1000(%rdi),%r8
+	/* See if it is a valid page table entry */
+1:	testb	$1, 0(%rdi)
+ffffffff810000ec:	f6 07 01             	testb  $0x1,(%rdi)
+	jz	2f
+ffffffff810000ef:	74 03                	je     ffffffff810000f4 <_text+0xf4>
+	addq	%rbp, 0(%rdi)
+ffffffff810000f1:	48 01 2f             	add    %rbp,(%rdi)
+	/* Go to the next page */
+2:	addq	$8, %rdi
+ffffffff810000f4:	48 83 c7 08          	add    $0x8,%rdi
+	cmp	%r8, %rdi
+ffffffff810000f8:	4c 39 c7             	cmp    %r8,%rdi
+	jne	1b
+ffffffff810000fb:	75 ef                	jne    ffffffff810000ec <_text+0xec>
+
+	/* Fixup phys_base */
+	addq	%rbp, phys_base(%rip)
+ffffffff810000fd:	48 01 2d 0c cf e0 00 	add    %rbp,0xe0cf0c(%rip)        # ffffffff81e0d010 <phys_base>
+
+	movq	$(early_level4_pgt - __START_KERNEL_map), %rax
+ffffffff81000104:	48 c7 c0 00 e0 fe 01 	mov    $0x1fee000,%rax
+	jmp 1f
+ffffffff8100010b:	eb 0f                	jmp    ffffffff8100011c <secondary_startup_64+0xc>
+ffffffff8100010d:	0f 1f 00             	nopl   (%rax)
+
+ffffffff81000110 <secondary_startup_64>:
+	 * to have any identity mapped pages in the kernel page table
+	 * after the boot processor executes this code.
+	 */
+
+	/* Sanitize CPU configuration */
+	call verify_cpu
+ffffffff81000110:	e8 94 00 00 00       	callq  ffffffff810001a9 <verify_cpu>
+
+	movq	$(init_level4_pgt - __START_KERNEL_map), %rax
+ffffffff81000115:	48 c7 c0 00 60 e0 01 	mov    $0x1e06000,%rax
+1:
+
+	/* Enable PAE mode and PGE */
+	movl	$(X86_CR4_PAE | X86_CR4_PGE), %ecx
+ffffffff8100011c:	b9 a0 00 00 00       	mov    $0xa0,%ecx
+	movq	%rcx, %cr4
+ffffffff81000121:	0f 22 e1             	mov    %rcx,%cr4
+
+	/* Setup early boot stage 4 level pagetables. */
+	addq	phys_base(%rip), %rax
+ffffffff81000124:	48 03 05 e5 ce e0 00 	add    0xe0cee5(%rip),%rax        # ffffffff81e0d010 <phys_base>
+	movq	%rax, %cr3
+ffffffff8100012b:	0f 22 d8             	mov    %rax,%cr3
+
+	/* Ensure I am executing from virtual addresses */
+	movq	$1f, %rax
+ffffffff8100012e:	48 c7 c0 37 01 00 81 	mov    $0xffffffff81000137,%rax
+	jmp	*%rax
+ffffffff81000135:	ff e0                	jmpq   *%rax
+1:
+
+	/* Check if nx is implemented */
+	movl	$0x80000001, %eax
+ffffffff81000137:	b8 01 00 00 80       	mov    $0x80000001,%eax
+	cpuid
+ffffffff8100013c:	0f a2                	cpuid  
+	movl	%edx,%edi
+ffffffff8100013e:	89 d7                	mov    %edx,%edi
+
+	/* Setup EFER (Extended Feature Enable Register) */
+	movl	$MSR_EFER, %ecx
+ffffffff81000140:	b9 80 00 00 c0       	mov    $0xc0000080,%ecx
+	rdmsr
+ffffffff81000145:	0f 32                	rdmsr  
+	btsl	$_EFER_SCE, %eax	/* Enable System Call */
+ffffffff81000147:	0f ba e8 00          	bts    $0x0,%eax
+	btl	$20,%edi		/* No Execute supported? */
+ffffffff8100014b:	0f ba e7 14          	bt     $0x14,%edi
+	jnc     1f
+ffffffff8100014f:	73 0d                	jae    ffffffff8100015e <secondary_startup_64+0x4e>
+	btsl	$_EFER_NX, %eax
+ffffffff81000151:	0f ba e8 0b          	bts    $0xb,%eax
+	btsq	$_PAGE_BIT_NX,early_pmd_flags(%rip)
+ffffffff81000155:	48 0f ba 2d f2 ce e0 	btsq   $0x3f,0xe0cef2(%rip)        # ffffffff81e0d050 <early_pmd_flags>
+ffffffff8100015c:	00 3f 
+1:	wrmsr				/* Make changes effective */
+ffffffff8100015e:	0f 30                	wrmsr  
+
+	/* Setup cr0 */
+#define CR0_STATE	(X86_CR0_PE | X86_CR0_MP | X86_CR0_ET | \
+			 X86_CR0_NE | X86_CR0_WP | X86_CR0_AM | \
+			 X86_CR0_PG)
+	movl	$CR0_STATE, %eax
+ffffffff81000160:	b8 33 00 05 80       	mov    $0x80050033,%eax
+	/* Make changes effective */
+	movq	%rax, %cr0
+ffffffff81000165:	0f 22 c0             	mov    %rax,%cr0
+
+	/* Setup a boot time stack */
+	movq stack_start(%rip), %rsp
+ffffffff81000168:	48 8b 25 f1 6f f0 00 	mov    0xf06ff1(%rip),%rsp        # ffffffff81f07160 <stack_start>
+
+	/* zero EFLAGS after setting rsp */
+	pushq $0
+ffffffff8100016f:	6a 00                	pushq  $0x0
+	popfq
+ffffffff81000171:	9d                   	popfq  
+	 * We must switch to a new descriptor in kernel space for the GDT
+	 * because soon the kernel won't have access anymore to the userspace
+	 * addresses where we're currently running on. We have to do that here
+	 * because in 32bit we couldn't load a 64bit linear address.
+	 */
+	lgdt	early_gdt_descr(%rip)
+ffffffff81000172:	0f 01 15 87 ce e0 00 	lgdt   0xe0ce87(%rip)        # ffffffff81e0d000 <early_gdt_descr>
+
+	/* set up data segments */
+	xorl %eax,%eax
+ffffffff81000179:	31 c0                	xor    %eax,%eax
+	movl %eax,%ds
+ffffffff8100017b:	8e d8                	mov    %eax,%ds
+	movl %eax,%ss
+ffffffff8100017d:	8e d0                	mov    %eax,%ss
+	movl %eax,%es
+ffffffff8100017f:	8e c0                	mov    %eax,%es
+	/*
+	 * We don't really need to load %fs or %gs, but load them anyway
+	 * to kill any stale realmode selectors.  This allows execution
+	 * under VT hardware.
+	 */
+	movl %eax,%fs
+ffffffff81000181:	8e e0                	mov    %eax,%fs
+	movl %eax,%gs
+ffffffff81000183:	8e e8                	mov    %eax,%gs
+	 * The base of %gs always points to the bottom of the irqstack
+	 * union.  If the stack protector canary is enabled, it is
+	 * located at %gs:40.  Note that, on SMP, the boot cpu uses
+	 * init data section till per cpu areas are set up.
+	 */
+	movl	$MSR_GS_BASE,%ecx
+ffffffff81000185:	b9 01 01 00 c0       	mov    $0xc0000101,%ecx
+	movl	initial_gs(%rip),%eax
+ffffffff8100018a:	8b 05 c8 6f f0 00    	mov    0xf06fc8(%rip),%eax        # ffffffff81f07158 <initial_gs>
+	movl	initial_gs+4(%rip),%edx
+ffffffff81000190:	8b 15 c6 6f f0 00    	mov    0xf06fc6(%rip),%edx        # ffffffff81f0715c <initial_gs+0x4>
+	wrmsr	
+ffffffff81000196:	0f 30                	wrmsr  
+
+	/* rsi is pointer to real mode structure with interesting info.
+	   pass it to C */
+	movq	%rsi, %rdi
+ffffffff81000198:	48 89 f7             	mov    %rsi,%rdi
+	 *	FF /5 JMP m16:32 Jump far, absolute indirect,
+	 *		address given in m16:32.
+	 *	REX.W + FF /5 JMP m16:64 Jump far, absolute indirect,
+	 *		address given in m16:64.
+	 */
+	movq	initial_code(%rip),%rax
+ffffffff8100019b:	48 8b 05 ae 6f f0 00 	mov    0xf06fae(%rip),%rax        # ffffffff81f07150 <initial_code>
+	pushq	$0		# fake return address to stop unwinder
+ffffffff810001a2:	6a 00                	pushq  $0x0
+	pushq	$__KERNEL_CS	# set correct cs
+ffffffff810001a4:	6a 10                	pushq  $0x10
+	pushq	%rax		# target address in negative space
+ffffffff810001a6:	50                   	push   %rax
+	lretq
+ffffffff810001a7:	48 cb                	lretq  
+
+ffffffff810001a9 <verify_cpu>:
+
+#include <asm/cpufeatures.h>
+#include <asm/msr-index.h>
+
+verify_cpu:
+	pushf				# Save caller passed flags
+ffffffff810001a9:	9c                   	pushfq 
+	push	$0			# Kill any dangerous flags
+ffffffff810001aa:	6a 00                	pushq  $0x0
+	popf
+ffffffff810001ac:	9d                   	popfq  
+	popl	%eax
+	cmpl	%eax,%ebx
+	jz	.Lverify_cpu_no_longmode	# cpu has no cpuid
+#endif
+
+	movl	$0x0,%eax		# See if cpuid 1 is implemented
+ffffffff810001ad:	b8 00 00 00 00       	mov    $0x0,%eax
+	cpuid
+ffffffff810001b2:	0f a2                	cpuid  
+	cmpl	$0x1,%eax
+ffffffff810001b4:	83 f8 01             	cmp    $0x1,%eax
+	jb	.Lverify_cpu_no_longmode	# no cpuid 1
+ffffffff810001b7:	0f 82 d2 00 00 00    	jb     ffffffff8100028f <verify_cpu+0xe6>
+
+	xor	%di,%di
+ffffffff810001bd:	66 31 ff             	xor    %di,%di
+	cmpl	$0x68747541,%ebx	# AuthenticAMD
+ffffffff810001c0:	81 fb 41 75 74 68    	cmp    $0x68747541,%ebx
+	jnz	.Lverify_cpu_noamd
+ffffffff810001c6:	75 16                	jne    ffffffff810001de <verify_cpu+0x35>
+	cmpl	$0x69746e65,%edx
+ffffffff810001c8:	81 fa 65 6e 74 69    	cmp    $0x69746e65,%edx
+	jnz	.Lverify_cpu_noamd
+ffffffff810001ce:	75 0e                	jne    ffffffff810001de <verify_cpu+0x35>
+	cmpl	$0x444d4163,%ecx
+ffffffff810001d0:	81 f9 63 41 4d 44    	cmp    $0x444d4163,%ecx
+	jnz	.Lverify_cpu_noamd
+ffffffff810001d6:	75 06                	jne    ffffffff810001de <verify_cpu+0x35>
+	mov	$1,%di			# cpu is from AMD
+ffffffff810001d8:	66 bf 01 00          	mov    $0x1,%di
+	jmp	.Lverify_cpu_check
+ffffffff810001dc:	eb 4d                	jmp    ffffffff8100022b <verify_cpu+0x82>
+
+.Lverify_cpu_noamd:
+	cmpl	$0x756e6547,%ebx        # GenuineIntel?
+ffffffff810001de:	81 fb 47 65 6e 75    	cmp    $0x756e6547,%ebx
+	jnz	.Lverify_cpu_check
+ffffffff810001e4:	75 45                	jne    ffffffff8100022b <verify_cpu+0x82>
+	cmpl	$0x49656e69,%edx
+ffffffff810001e6:	81 fa 69 6e 65 49    	cmp    $0x49656e69,%edx
+	jnz	.Lverify_cpu_check
+ffffffff810001ec:	75 3d                	jne    ffffffff8100022b <verify_cpu+0x82>
+	cmpl	$0x6c65746e,%ecx
+ffffffff810001ee:	81 f9 6e 74 65 6c    	cmp    $0x6c65746e,%ecx
+	jnz	.Lverify_cpu_check
+ffffffff810001f4:	75 35                	jne    ffffffff8100022b <verify_cpu+0x82>
+
+	# only call IA32_MISC_ENABLE when:
+	# family > 6 || (family == 6 && model >= 0xd)
+	movl	$0x1, %eax		# check CPU family and model
+ffffffff810001f6:	b8 01 00 00 00       	mov    $0x1,%eax
+	cpuid
+ffffffff810001fb:	0f a2                	cpuid  
+	movl	%eax, %ecx
+ffffffff810001fd:	89 c1                	mov    %eax,%ecx
+
+	andl	$0x0ff00f00, %eax	# mask family and extended family
+ffffffff810001ff:	25 00 0f f0 0f       	and    $0xff00f00,%eax
+	shrl	$8, %eax
+ffffffff81000204:	c1 e8 08             	shr    $0x8,%eax
+	cmpl	$6, %eax
+ffffffff81000207:	83 f8 06             	cmp    $0x6,%eax
+	ja	.Lverify_cpu_clear_xd	# family > 6, ok
+ffffffff8100020a:	77 10                	ja     ffffffff8100021c <verify_cpu+0x73>
+	jb	.Lverify_cpu_check	# family < 6, skip
+ffffffff8100020c:	72 1d                	jb     ffffffff8100022b <verify_cpu+0x82>
+
+	andl	$0x000f00f0, %ecx	# mask model and extended model
+ffffffff8100020e:	81 e1 f0 00 0f 00    	and    $0xf00f0,%ecx
+	shrl	$4, %ecx
+ffffffff81000214:	c1 e9 04             	shr    $0x4,%ecx
+	cmpl	$0xd, %ecx
+ffffffff81000217:	83 f9 0d             	cmp    $0xd,%ecx
+	jb	.Lverify_cpu_check	# family == 6, model < 0xd, skip
+ffffffff8100021a:	72 0f                	jb     ffffffff8100022b <verify_cpu+0x82>
+
+.Lverify_cpu_clear_xd:
+	movl	$MSR_IA32_MISC_ENABLE, %ecx
+ffffffff8100021c:	b9 a0 01 00 00       	mov    $0x1a0,%ecx
+	rdmsr
+ffffffff81000221:	0f 32                	rdmsr  
+	btrl	$2, %edx		# clear MSR_IA32_MISC_ENABLE_XD_DISABLE
+ffffffff81000223:	0f ba f2 02          	btr    $0x2,%edx
+	jnc	.Lverify_cpu_check	# only write MSR if bit was changed
+ffffffff81000227:	73 02                	jae    ffffffff8100022b <verify_cpu+0x82>
+	wrmsr
+ffffffff81000229:	0f 30                	wrmsr  
+
+.Lverify_cpu_check:
+	movl    $0x1,%eax		# Does the cpu have what it takes
+ffffffff8100022b:	b8 01 00 00 00       	mov    $0x1,%eax
+	cpuid
+ffffffff81000230:	0f a2                	cpuid  
+	andl	$REQUIRED_MASK0,%edx
+ffffffff81000232:	81 e2 61 81 00 07    	and    $0x7008161,%edx
+	xorl	$REQUIRED_MASK0,%edx
+ffffffff81000238:	81 f2 61 81 00 07    	xor    $0x7008161,%edx
+	jnz	.Lverify_cpu_no_longmode
+ffffffff8100023e:	75 4f                	jne    ffffffff8100028f <verify_cpu+0xe6>
+
+	movl    $0x80000000,%eax	# See if extended cpuid is implemented
+ffffffff81000240:	b8 00 00 00 80       	mov    $0x80000000,%eax
+	cpuid
+ffffffff81000245:	0f a2                	cpuid  
+	cmpl    $0x80000001,%eax
+ffffffff81000247:	3d 01 00 00 80       	cmp    $0x80000001,%eax
+	jb      .Lverify_cpu_no_longmode	# no extended cpuid
+ffffffff8100024c:	72 41                	jb     ffffffff8100028f <verify_cpu+0xe6>
+
+	movl    $0x80000001,%eax	# Does the cpu have what it takes
+ffffffff8100024e:	b8 01 00 00 80       	mov    $0x80000001,%eax
+	cpuid
+ffffffff81000253:	0f a2                	cpuid  
+	andl    $REQUIRED_MASK1,%edx
+ffffffff81000255:	81 e2 00 00 00 20    	and    $0x20000000,%edx
+	xorl    $REQUIRED_MASK1,%edx
+ffffffff8100025b:	81 f2 00 00 00 20    	xor    $0x20000000,%edx
+	jnz     .Lverify_cpu_no_longmode
+ffffffff81000261:	75 2c                	jne    ffffffff8100028f <verify_cpu+0xe6>
+
+.Lverify_cpu_sse_test:
+	movl	$1,%eax
+ffffffff81000263:	b8 01 00 00 00       	mov    $0x1,%eax
+	cpuid
+ffffffff81000268:	0f a2                	cpuid  
+	andl	$SSE_MASK,%edx
+ffffffff8100026a:	81 e2 00 00 00 06    	and    $0x6000000,%edx
+	cmpl	$SSE_MASK,%edx
+ffffffff81000270:	81 fa 00 00 00 06    	cmp    $0x6000000,%edx
+	je	.Lverify_cpu_sse_ok
+ffffffff81000276:	74 1e                	je     ffffffff81000296 <verify_cpu+0xed>
+	test	%di,%di
+ffffffff81000278:	66 85 ff             	test   %di,%di
+	jz	.Lverify_cpu_no_longmode	# only try to force SSE on AMD
+ffffffff8100027b:	74 12                	je     ffffffff8100028f <verify_cpu+0xe6>
+	movl	$MSR_K7_HWCR,%ecx
+ffffffff8100027d:	b9 15 00 01 c0       	mov    $0xc0010015,%ecx
+	rdmsr
+ffffffff81000282:	0f 32                	rdmsr  
+	btr	$15,%eax		# enable SSE
+ffffffff81000284:	0f ba f0 0f          	btr    $0xf,%eax
+	wrmsr
+ffffffff81000288:	0f 30                	wrmsr  
+	xor	%di,%di			# don't loop
+ffffffff8100028a:	66 31 ff             	xor    %di,%di
+	jmp	.Lverify_cpu_sse_test	# try again
+ffffffff8100028d:	eb d4                	jmp    ffffffff81000263 <verify_cpu+0xba>
+
+.Lverify_cpu_no_longmode:
+	popf				# Restore caller passed flags
+ffffffff8100028f:	9d                   	popfq  
+	movl $1,%eax
+ffffffff81000290:	b8 01 00 00 00       	mov    $0x1,%eax
+	ret
+ffffffff81000295:	c3                   	retq   
+.Lverify_cpu_sse_ok:
+	popf				# Restore caller passed flags
+ffffffff81000296:	9d                   	popfq  
+	xorl %eax, %eax
+ffffffff81000297:	31 c0                	xor    %eax,%eax
+	ret
+ffffffff81000299:	c3                   	retq   
+ffffffff8100029a:	66 0f 1f 44 00 00    	nopw   0x0(%rax,%rax,1)
+
+ffffffff810002a0 <start_cpu0>:
+ * Boot CPU0 entry point. It's called from play_dead(). Everything has been set
+ * up already except stack. We just set up stack here. Then call
+ * start_secondary().
+ */
+ENTRY(start_cpu0)
+	movq stack_start(%rip),%rsp
+ffffffff810002a0:	48 8b 25 b9 6e f0 00 	mov    0xf06eb9(%rip),%rsp        # ffffffff81f07160 <stack_start>
+	movq	initial_code(%rip),%rax
+ffffffff810002a7:	48 8b 05 a2 6e f0 00 	mov    0xf06ea2(%rip),%rax        # ffffffff81f07150 <initial_code>
+	pushq	$0		# fake return address to stop unwinder
+ffffffff810002ae:	6a 00                	pushq  $0x0
+	pushq	$__KERNEL_CS	# set correct cs
+ffffffff810002b0:	6a 10                	pushq  $0x10
+	pushq	%rax		# target address in negative space
+ffffffff810002b2:	50                   	push   %rax
+	lretq
+ffffffff810002b3:	48 cb                	lretq  
+
+ffffffff810002b5 <bad_address>:
+	.quad  init_thread_union+THREAD_SIZE-8
+	.word  0
+	__FINITDATA
+
+bad_address:
+	jmp bad_address
+ffffffff810002b5:	eb fe                	jmp    ffffffff810002b5 <bad_address>
+ffffffff810002b7:	90                   	nop
+
+ffffffff810002b8 <_stext>:
+ffffffff810002b8:	90                   	nop
+ffffffff810002b9:	90                   	nop
+ffffffff810002ba:	90                   	nop
+ffffffff810002bb:	90                   	nop
+ffffffff810002bc:	90                   	
