@@ -10,7 +10,7 @@ fout = open("tes.txt",'w')
 #改变路径  
 os.chdir(path) 
 
-filename = 'b'
+filename = 'tes'
 fs = open(filename,'r+')  
 #处理文件中的每一行数据  
 for line in fs.readlines():  
